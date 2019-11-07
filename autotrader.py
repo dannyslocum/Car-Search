@@ -8,7 +8,10 @@ import time
 
 # searchRadius = [0, 10, 25, 50, 75, 100, 200, 300, 400, 500]
 
-def __main__():
+if __name__ == "__main__":
+    main()
+
+def main():
     query = {
         "city": "Arlington",
         "state": "VA",
@@ -16,12 +19,14 @@ def __main__():
         "searchRadius": 0,
         "makeCodeList": "MAZDA",
         "modelCodeList": "CX-5",
+        "startYear": 2016,
+        "endYear": 2017,
         "driveGroup": "AWD4WD",
-        "sellerTypes": "d"
+        "sellerTypes": "d",
+        "maxRecords": 3000
     }
     AT = AutoTrader(query)
-    data = AT.get_data()
-    AT.save_data()
+    AT.get_data()
 
 
 class AutoTrader:
@@ -29,6 +34,7 @@ class AutoTrader:
         self.query = query
         self.firstRecord = 0
         self.numRecords = 100
+        self.maxRecords = self.query['maxRecords']
         self.trim = ['Grand Touring Reserve', 'Grand Touring', 'Grand Select', 'Signature', 'Touring', 'Sport']
         city = self.query['city']
         state = self.query['state']
@@ -52,11 +58,17 @@ class AutoTrader:
         return
 
     def get_data(self):
-        print("Get data {} - {}".format(self.firstRecord, self.firstRecord + self.numRecords))
         r = self.data_request()
         soup = bs(r.text, 'html.parser')
         result_total = soup.find("div", {"class": "results-text-container"}).get_text()
         result_total = int(re.sub("(.+ of | Results|,|[+])", "", result_total))
+        if result_total == 1000:
+            print("Results: 1000+")
+            result_total = self.maxRecords
+            print("Attempting to pull a max of {} records".format(result_total))
+        else:
+            print("Results:", result_total)
+        print("Get data {} - {}".format(self.firstRecord, self.firstRecord + self.numRecords))
         car_data = self.parse_html(r)
         while self.firstRecord < result_total:
             wait_time = random.random()*30+20
@@ -65,7 +77,10 @@ class AutoTrader:
             print("Get data {} - {}".format(self.firstRecord, self.firstRecord + self.numRecords))
             r = self.data_request()
             page_data = self.parse_html(r)
-            car_data = np.append(car_data, page_data)
+            if len(page_data) > 0:
+                car_data = np.append(car_data, page_data)
+            else:
+                break
         self.results = pd.DataFrame(list(car_data))
         return self.results
 
@@ -73,24 +88,31 @@ class AutoTrader:
         params = {
             "searchRadius": self.query["searchRadius"],
             "sortBy": "relevance",
+            "listingTypes": "USED,CERTIFIED",
             "numRecords": self.numRecords,
             "firstRecord": self.firstRecord,
             "makeCodeList": self.query["makeCodeList"],
             "modelCodeList": self.query["modelCodeList"],
             "driveGroup": self.query["driveGroup"],
             "sellerTypes": self.query["sellerTypes"],
-            "marketExtension": True
+            "marketExtension": True,
+            "startYear": self.query['startYear'],
+            "endYear": self.query['endYear'],
+            "trimCodeList": self.query['trimCodeList']
         }
         r = requests.get(self.base_url, params=params, headers=self.headers)
         self.firstRecord += self.numRecords
         return r
 
     def parse_html(self, r):
-        soup = bs(r.text, 'html.parser')
-        listings_group = soup.find("div", {"data-qaid": "cntnr-listings-tier-listings"})
-        all_listings = listings_group.findAll("div", {"data-cmp": "inventoryListing"})
-        listing_data = [self.extract_information(listing) for listing in all_listings]
-        return listing_data
+        try:
+            soup = bs(r.text, 'html.parser')
+            listings_group = soup.find("div", {"data-qaid": "cntnr-listings-tier-listings"})
+            all_listings = listings_group.findAll("div", {"data-cmp": "inventoryListing"})
+            listing_data = [self.extract_information(listing) for listing in all_listings]
+            return listing_data
+        except:
+            return []
 
     def extract_information(self, listing):
         try:
